@@ -89,7 +89,9 @@ Creates a streaming view on the source Delta table, reading Change Data Feed (CD
 
 Filters out update_preimage (old values).
 Adds a column is_deleted to flag soft-deleted rows.
+
 2. Silver Streaming Target Table
+
 DLT Cell:
 dlt.create_streaming_table(
     name=target_name,
@@ -103,7 +105,9 @@ Purpose:
 Defines a streaming Delta table (silver layer) to store merged CDC data.
 
 Enables Delta Lake optimizations for write and compaction.
+
 3. AUTO CDC Flow (Realtime)
+
 DLT Cell:
 dlt.create_auto_cdc_flow(
     target=target_name,
@@ -121,7 +125,9 @@ Merges inserts, updates, and deletes from the CDF view into the silver table.
 Uses primary keys and commit version for sequencing.
 Excludes CDF metadata columns from the target.
 Implements soft-delete (rows are flagged, not removed).
+
 4. Backfill View (Optional, One-Time)
+
 DLT Cell:
 @dlt.view(
     name=backfill_view_name,
@@ -139,7 +145,9 @@ Creates a one-time view for backfilling historical data (before CDF was enabled)
 
 Assigns _commit_version = 0 (so real CDC events take precedence).
 Sets is_deleted = False (all rows are active).
+
 5. AUTO CDC Flow (Backfill, One-Time)
+
 DLT Cell:
 dlt.create_auto_cdc_flow(
     target=target_name,
