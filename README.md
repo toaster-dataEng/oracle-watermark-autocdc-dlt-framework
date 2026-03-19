@@ -71,6 +71,7 @@ Cells 4, 5, 8, 9, and 10 are development/testing artifacts.
 
 --=================================================================================================================DLT Pipeline==============================================================--
 1. CDF Source View
+
 DLT Cell:
 @dlt.view(name=view_name, comment=f"CDF stream for {raw_name}")
 def _cdf_view(src=source_table):
