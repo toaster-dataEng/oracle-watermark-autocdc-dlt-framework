@@ -67,3 +67,102 @@ For production, only cells 2 → 3 → 4 (optional) → 6 → 7 need to run in o
 
 [Cell 2: Load utilities] → [Cell 3: Init variables] → [Cell 6: CDF pre-flight] → [Cell 7: Ingest all tables]
 Cells 4, 5, 8, 9, and 10 are development/testing artifacts.
+
+
+--=================================================================================================================DLT Pipeline==============================================================--
+1. CDF Source View
+DLT Cell:
+@dlt.view(name=view_name, comment=f"CDF stream for {raw_name}")
+def _cdf_view(src=source_table):
+    return (
+        spark.readStream
+            .format("delta")
+            .option("readChangeData", "true")
+            .table(src)
+            .filter("_change_type != 'update_preimage'")
+            .withColumn("is_deleted", expr("_change_type = 'delete'"))
+    )
+
+Purpose:
+Creates a streaming view on the source Delta table, reading Change Data Feed (CDF) events.
+
+Filters out update_preimage (old values).
+Adds a column is_deleted to flag soft-deleted rows.
+2. Silver Streaming Target Table
+DLT Cell:
+dlt.create_streaming_table(
+    name=target_name,
+    table_properties={
+        "delta.autoOptimize.optimizeWrite": "true",
+        "delta.autoOptimize.autoCompact": "true",
+    },
+)
+    
+Purpose:
+Defines a streaming Delta table (silver layer) to store merged CDC data.
+
+Enables Delta Lake optimizations for write and compaction.
+3. AUTO CDC Flow (Realtime)
+DLT Cell:
+dlt.create_auto_cdc_flow(
+    target=target_name,
+    source=view_name,
+    keys=keys,
+    sequence_by=col("_commit_version"),
+    except_column_list=_CDF_META_COLS,
+    name=flow_name,
+)
+
+Purpose:
+Sets up an automatic CDC merge flow:
+
+Merges inserts, updates, and deletes from the CDF view into the silver table.
+Uses primary keys and commit version for sequencing.
+Excludes CDF metadata columns from the target.
+Implements soft-delete (rows are flagged, not removed).
+4. Backfill View (Optional, One-Time)
+DLT Cell:
+@dlt.view(
+    name=backfill_view_name,
+    comment=f"One-time batch snapshot for backfill of {raw_name}",
+)
+def _backfill_view(src=source_table):
+    return (
+        spark.readStream.table(src)
+        .withColumn("_commit_version", lit(0).cast("long"))
+        .withColumn("is_deleted", lit(False))
+    )
+
+Purpose:
+Creates a one-time view for backfilling historical data (before CDF was enabled):
+
+Assigns _commit_version = 0 (so real CDC events take precedence).
+Sets is_deleted = False (all rows are active).
+5. AUTO CDC Flow (Backfill, One-Time)
+DLT Cell:
+dlt.create_auto_cdc_flow(
+    target=target_name,
+    source=backfill_view_name,
+    keys=keys,
+    sequence_by=col("_commit_version"),
+    except_column_list=["_commit_version"],
+    name=backfill_flow_name,
+    once=True,
+)
+
+Purpose:
+Runs a one-time merge of the backfill view into the silver table:
+
+Ensures historical rows are loaded only once.
+Excludes _commit_version from the target.
+
+<img width="316" height="492" alt="image" src="https://github.com/user-attachments/assets/46dacd02-3a95-4d54-bb48-9ef01d6f8d10" />
+
+
+In summary:
+Each config entry creates a pipeline with:
+
+A streaming CDF view
+A silver target table
+An auto CDC flow for real-time merges
+(Optionally) a backfill view and flow for historical data
